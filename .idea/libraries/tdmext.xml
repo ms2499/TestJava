@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="tdmext">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/lib/tdmext.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
