@@ -1,17 +1,6 @@
 package com.example.testjava;
 
 public class CharsetTool {
-    public String iso2utf8(String s){
-        try {
-                byte[] bytes = s.getBytes("ISO-8859-1");
-                return new String(bytes, "UTF-8");
-        }
-        catch (Exception e){
-            e.printStackTrace();
-        }
-        return s;
-    }
-
     public String big52iso(String s){
         try {
                 byte[] bytes = s.getBytes("BIG5");
@@ -33,5 +22,4 @@ public class CharsetTool {
         }
         return false;
     }
-
 }

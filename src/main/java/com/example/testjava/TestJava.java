@@ -6,23 +6,25 @@ import java.nio.charset.StandardCharsets;
 
 public class TestJava {
     public static void main(String[] args){
-        CharsetTool cstool = new CharsetTool();
-        String pmonName = "$YTPW";
-        String svrClassName = "FUS101";
-        TsmpServer getServer = new TsmpServer(pmonName, svrClassName);
-        byte[] greply = new byte[4096];
-        IpmHeader ipm = new IpmHeader();
-        FUS101 fus101 = new FUS101();
+        CharsetTool cstool = new CharsetTool(); //轉編碼用
+        String pmonName = "$YTPW"; //pathmon name
+        String svrClassName = "FUS101"; //server class name
+        TsmpServer getServer = new TsmpServer(pmonName, svrClassName); //pathsend用物件
+        byte[] greply = new byte[4096]; //pathsend完放資料的array
+        IpmHeader ipm = new IpmHeader(); //COBOL那邊定義的IPM-HEADER格式
+        FUS101 fus101 = new FUS101(); //FUS101的MESSAGE-IN-R格式
         byte[] ipmHeader = ipm.getBytes();
         byte[] fus101Send = fus101.getSendData();
         byte[] request = new byte[ipmHeader.length + fus101Send.length];
         System.arraycopy(ipmHeader, 0, request, 0, ipmHeader.length);
         System.arraycopy(fus101Send, 0, request, ipmHeader.length, fus101Send.length);
         try {
-            getServer.service(request, request.length, greply);
+            getServer.service(request, request.length, greply); //pathsend
         }catch (Exception e){
             e.printStackTrace();
         }
+
+        //處理pathsend回來的資料
         byte[][] wrShareData = new byte[12][64];
         byte[][] wrFeeKind = new byte[12][14];
         int startpos = 2 + 78 + 14 + 14;
