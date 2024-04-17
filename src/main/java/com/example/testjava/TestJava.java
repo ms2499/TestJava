@@ -1,178 +1,161 @@
 package com.example.testjava;
 
-import com.tandem.ext.enscribe.EnscribeFile;
-import com.tandem.ext.enscribe.EnscribeFileException;
-import com.tandem.ext.enscribe.EnscribeKeyPositionOptions;
-import com.tandem.ext.enscribe.EnscribeOpenOptions;
-import com.tandem.ext.guardian.GError;
-import com.tandem.ext.guardian.GuardianException;
-import com.tandem.tsmp.TsmpServer;
+import org.apache.commons.lang3.StringUtils;
+import org.dom4j.Document;
+import org.dom4j.DocumentHelper;
+import org.dom4j.Element;
+import org.dom4j.io.OutputFormat;
+import org.dom4j.io.XMLWriter;
 
-import java.math.BigDecimal;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.*;
 
 public class TestJava {
     public static void main(String[] args){
-        try {
-            CharsetTool cstool = new CharsetTool();
-            EnscribeFile fumcom = new EnscribeFile("/G/FU1/SAMOSS/FUMCOM"); //指定檔案路徑 $FU1.SAMOSS.FUMCOM
-            //設定open file方式
-            EnscribeOpenOptions openAttr = new EnscribeOpenOptions();
-            openAttr.setAccess(EnscribeOpenOptions.READ_WRITE);
-            openAttr.setExclusion(EnscribeOpenOptions.SHARED);
-            fumcom.open(openAttr);
-            System.out.println(cstool.big52iso("開檔成功! File:") + fumcom.getFileName());
+        File file = new File("/G/FU1/SAMOSS/USDDL");
+        try{
+            FileReader fr = new FileReader(file);
+            BufferedReader bf = new BufferedReader(fr);
+            String tmp = null;
+            Document doc = DocumentHelper.createDocument();
+            Element root = doc.addElement("EnscribeFiles"); //根元素
+            Element fileRoot = null; //每個file的根元素
 
-            System.out.println("------------------------------------------------------------");
 
-            //設定key及查詢方式
-//            EnscribeKeyPositionOptions kpa = new EnscribeKeyPositionOptions();
-//            String keyvalue;
-//            kpa.setKeySpecifier((short) 0); //0表示P Key
-//            keyvalue = cstool.big52iso("F000000CAA    ");
-//            kpa.setKeyValue(keyvalue);
-//            kpa.setPositioningMode(EnscribeKeyPositionOptions.POSITION_GENERIC);
-//            kpa.setKeyLength((short)14);
-//            kpa.setCompareLength(10);
-//            fumcom.keyPosition(kpa);
+            System.out.println("start!");
+            List<String> strList = new ArrayList<>();
+            String currSection = "";
+            while ((tmp = bf.readLine()) != null){
+                tmp = tmp.trim();
+                if (StringUtils.containsIgnoreCase(tmp, "?SECTION")){
+                    String[] words = tmp.split("\\s+");
+                    currSection = words[1].toUpperCase();
+                    fileRoot = root.addElement(currSection);
+                }else if (tmp.length() >= 2 && StringUtils.isNumeric(tmp.substring(0, 2))) {
+                    if (!tmp.contains(".")){
+                        String nextStr = "";
+                        StringBuilder tmpBuild = new StringBuilder();
+                        tmpBuild.append(tmp);
+                        do {
+                            tmpBuild.append(" ");
+                            nextStr = bf.readLine().trim();
+                            tmpBuild.append(nextStr);
+                        } while (!StringUtils.contains(nextStr, "."));
+                        strList.add(String.valueOf(tmpBuild));
+                    } else {
+                        strList.add(tmp);
+                    }
+                }
 
-            //讀檔並將讀出來的資料放入IO_Fumcom_r
-            //IO_Fumcom_r 此物件由ddl2java產出
-            IO_Fumcom_r fumcomR = new IO_Fumcom_r();
-            int countRead = 0;
-            System.out.println(cstool.big52iso("開始讀檔 "));
-            do{
-                countRead = fumcom.read(fumcomR);
-                if (countRead != -1) // -1 = EOF
-                    System.out.println(fumcomR.getCom_commodity_id() + " " +
-                            fumcomR.getCom_name() + " " +
-                            fumcomR.getCom_min_fluct());
-            }while (countRead != -1);
-            System.out.println(cstool.big52iso("讀檔完畢!"));
+                if (StringUtils.containsIgnoreCase(tmp, "end") &&
+                        tmp.substring(0, 3).equalsIgnoreCase("end")){
+                    ArrayList<Integer> nodeLevelList = new ArrayList<>();
+                    HashMap<Integer, Element> parentNodeMap = new HashMap<>();
+                    int preLevel = 0;
+                    Element preNode = null;
+                    System.out.println("Add element " + currSection + "...");
+                    for (int i = 0; i < strList.size(); i++){
+                        //level colName                                head
+                        //10    AEG-BROKER-ID                PIC X(07) Heading "期貨商代號".
+                        String current = strList.get(i);
+                        String[] words = current.split("\\s+"); // \\s+表示一個空白+任意長度空白
+                        int level = Integer.parseInt(words[0]);
+                        String colName = words[1].replace(".", "");
+                        String head = colName;
+                        if (current.contains("Heading")) {
+                            head = current.substring(current.indexOf("Heading ")+8)
+                                    .replace(".", "").replace("\"", "");
+                            byte[] bytes = new String(head.getBytes(), "BIG5").getBytes(StandardCharsets.UTF_8);
+                            head = new String(bytes);
+                        }
 
-            System.out.println("------------------------------------------------------------");
+                        //System.out.println("current :"+current);
+                        //System.out.println("level   :"+level);
+                        //System.out.println("colName :"+colName);
+                        //System.out.println("head    :"+head);
 
-            //新增一筆資料
-            System.out.println(cstool.big52iso("開始新增資料"));
-            fumcomR = new IO_Fumcom_r();
-            EnscribeKeyPositionOptions kpa = new EnscribeKeyPositionOptions();
-            String keyvalue;
-            kpa.setKeySpecifier((short) 0); //0表示P Key
-            keyvalue = cstool.big52iso("F000000CAA    ");
-            kpa.setKeyValue(keyvalue);
-            kpa.setPositioningMode(EnscribeKeyPositionOptions.POSITION_GENERIC);
-            kpa.setKeyLength((short)14);
-            kpa.setCompareLength(14);
-            fumcom.keyPosition(kpa);
-            fumcom.read(fumcomR);
-            fumcomR.setCom_commodity_id(cstool.big52iso("CAA   T"));
-            fumcomR.setCom_min_fluct(BigDecimal.valueOf(3000.12));
-            try {
-                fumcom.write(fumcomR);
-
-                //新增完重新查詢，確定非殘留資料
-                fumcomR = new IO_Fumcom_r();
-                keyvalue = cstool.big52iso("F000000CAA   T");
-                kpa.setKeyValue(keyvalue);
-                kpa.setPositioningMode(EnscribeKeyPositionOptions.POSITION_EXACT);
-                kpa.setKeyLength((short)14);
-                kpa.setCompareLength(14);
-                fumcom.keyPosition(kpa);
-                countRead = fumcom.read(fumcomR);
-                if (countRead == -1)
-                    throw new EnscribeFileException(cstool.big52iso("查無資料!"), (short) GError.EEOF,
-                            cstool.big52iso("insert"), fumcom.getFileName());
-                System.out.println(cstool.big52iso("新增一筆:") +
-                        fumcomR.getCom_commodity_id() + " " +
-                        fumcomR.getCom_name() + " " +
-                        fumcomR.getCom_min_fluct());
-            }catch (EnscribeFileException ef){
-                System.out.println("Guardian error = " + ef.getErrorNum());
-                if (ef.getErrorNum() == GError.EBADERR) //Guardian error 10
-                    System.out.println(cstool.big52iso("此筆已存在:") +
-                            fumcomR.getCom_commodity_id() + " " +
-                            fumcomR.getCom_name() + " " +
-                            fumcomR.getCom_min_fluct());
+                        Element node = null;
+                        if (i == 0) {
+                            //第一行欄位，通常是PK
+                            node = fileRoot.addElement(colName);
+                            nodeLevelList.add(level); //5
+                            parentNodeMap.put(level, node);  //5 AEG-PK
+                        }else if (i == strList.size() - 1) {
+                            //最後一行欄位
+                            if (level < preLevel) {
+                                int fatherIndex = nodeLevelList.indexOf(level);
+                                if (fatherIndex > 0)
+                                    fatherIndex--;
+                                Element fatherNode = parentNodeMap.get(nodeLevelList.get(fatherIndex));
+                                node = fatherNode.addElement(colName);
+                            }
+                            else if (level == preLevel) {
+                                int fatherIndex = nodeLevelList.indexOf(level) - 1;
+                                Element fatherNode;
+                                if (fatherIndex <= -1)
+                                    fatherNode = fileRoot;
+                                else
+                                    fatherNode = parentNodeMap.get(nodeLevelList.get(fatherIndex));
+                                node = fatherNode.addElement(colName);
+                            }else {
+                                node = preNode.addElement(colName);
+                            }
+                            nodeLevelList.clear();
+                            parentNodeMap.clear();
+                        }else {
+                            if (level < preLevel) {
+                                //當前階層 < 上一行的階層，去找parent
+                                int fatherIndex = nodeLevelList.indexOf(level);
+                                Element fatherNode;
+                                if (fatherIndex <= 0)
+                                    fatherNode = fileRoot;
+                                else {
+                                    fatherIndex--;
+                                    fatherNode = parentNodeMap.get(nodeLevelList.get(fatherIndex));
+                                }
+                                node = fatherNode.addElement(colName);
+                                nodeLevelList.removeIf(e -> e > level); //大於當前level都刪掉
+                                parentNodeMap.put(level, node);
+                            }else if (level == preLevel) {
+                                //新增同父元素，找上一層父元素
+                                int fatherIndex = nodeLevelList.indexOf(level) - 1;
+                                Element fatherNode;
+                                if (fatherIndex <= -1)
+                                    fatherNode = fileRoot;
+                                else
+                                    fatherNode = parentNodeMap.get(nodeLevelList.get(fatherIndex));
+                                node = fatherNode.addElement(colName);
+                                parentNodeMap.put(level, node);
+                            }else {
+                                //新增子元素，直接在上一個元素下新增
+                                node = preNode.addElement(colName);
+                                nodeLevelList.add(level);
+                                parentNodeMap.put(level, node);
+                            }
+                        }
+                        node.addAttribute("head", head);
+                        preNode = node;
+                        preLevel = level;
+                    }
+                    //break;
+                    strList.clear();
+                    System.out.println("Add element " + currSection + " complete");
+                }
             }
 
-            System.out.println("------------------------------------------------------------");
-
-            System.out.println(cstool.big52iso("開始更新資料"));
-            fumcomR = new IO_Fumcom_r();
-            keyvalue = cstool.big52iso("F000000CAA   T");
-            kpa.setKeyValue(keyvalue);
-            kpa.setPositioningMode(EnscribeKeyPositionOptions.POSITION_EXACT);
-            kpa.setKeyLength((short)14);
-            kpa.setCompareLength(14);
-            fumcom.keyPosition(kpa);
-            fumcom.readLock(fumcomR);
-            System.out.println(cstool.big52iso("舊資料:") +
-                    fumcomR.getCom_commodity_id() + " " +
-                    fumcomR.getCom_name() + " " +
-                    fumcomR.getCom_min_fluct());
-            fumcomR.setCom_min_fluct(BigDecimal.valueOf(4321.97));
-            fumcomR.setCom_name(cstool.big52iso("南亞塑膠工業選擇權測試        "));
-            try {
-                fumcom.writeUpdateUnlock(fumcomR);
-
-                //更新完重新查詢，確定非殘留資料
-                fumcomR = new IO_Fumcom_r();
-                keyvalue = cstool.big52iso("F000000CAA   T");
-                kpa.setKeyValue(keyvalue);
-                kpa.setPositioningMode(EnscribeKeyPositionOptions.POSITION_EXACT);
-                kpa.setKeyLength((short)14);
-                kpa.setCompareLength(14);
-                fumcom.keyPosition(kpa);
-                countRead = fumcom.read(fumcomR);
-                if (countRead == -1)
-                    throw new EnscribeFileException(cstool.big52iso("查無資料!"), (short) GError.EEOF,
-                            cstool.big52iso("insert"), fumcom.getFileName());
-                System.out.println(cstool.big52iso("新資料:") +
-                        fumcomR.getCom_commodity_id() + " " +
-                        fumcomR.getCom_name() + " " +
-                        fumcomR.getCom_min_fluct());
-            }catch (EnscribeFileException ef){
-                System.out.println("Guardian error = " + ef.getErrorNum());
-            }
-
-            System.out.println("------------------------------------------------------------");
-
-            System.out.println(cstool.big52iso("開始刪除資料"));
-            fumcomR = new IO_Fumcom_r();
-            keyvalue = cstool.big52iso("F000000CAA   T");
-            kpa.setKeyValue(keyvalue);
-            kpa.setPositioningMode(EnscribeKeyPositionOptions.POSITION_EXACT);
-            kpa.setKeyLength((short)14);
-            kpa.setCompareLength(14);
-            fumcom.keyPosition(kpa);
-            fumcom.readLock(fumcomR);
-            try {
-                fumcom.deleteRecordUnlock();
-                System.out.println(cstool.big52iso("刪除資料:") +
-                        fumcomR.getCom_commodity_id() + " " +
-                        fumcomR.getCom_name() + " " +
-                        fumcomR.getCom_min_fluct());
-            }catch (EnscribeFileException ef){
-                System.out.println("Guardian error = " + ef.getErrorNum());
-            }
-
-            System.out.print(cstool.big52iso("重新讀取，確認已刪除 => "));
-            keyvalue = cstool.big52iso("F000000CAA   T");
-            kpa.setKeyValue(keyvalue);
-            kpa.setPositioningMode(EnscribeKeyPositionOptions.POSITION_EXACT);
-            kpa.setKeyLength((short)14);
-            kpa.setCompareLength(14);
-            fumcom.keyPosition(kpa);
-            try {
-                countRead = fumcom.read(fumcomR);
-                if (countRead == -1)
-                    System.out.println(cstool.big52iso("查無此筆資料! PKey=[") + keyvalue + "]");
-            }catch (EnscribeFileException ef){
-                System.out.println("Guardian error = " + ef.getErrorNum());
-            }
-
-        }catch (GuardianException ge){
-            System.out.println("Guardian error = " + ge.getErrorNum());
+            FileWriter fw = new FileWriter("EnsFilesXml.xml");
+            OutputFormat of = new OutputFormat();
+            of.setIndentSize(4);//設定Tab為幾個空格
+            of.setNewlines(true);//設定是否換行
+            XMLWriter xw = new XMLWriter(fw, of);
+            xw.write(doc);
+            xw.close();
+            System.out.println("Make xml end.");
         }catch (Exception e){
             e.printStackTrace();
         }
