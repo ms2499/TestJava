@@ -1,163 +1,197 @@
 package com.example.testjava;
 
-import org.apache.commons.lang3.StringUtils;
-import org.dom4j.Document;
-import org.dom4j.DocumentHelper;
-import org.dom4j.Element;
-import org.dom4j.io.OutputFormat;
-import org.dom4j.io.XMLWriter;
+import com.tandem.ext.enscribe.EnscribeFile;
+import com.tandem.ext.enscribe.EnscribeFileException;
+import com.tandem.ext.enscribe.EnscribeOpenOptions;
+import com.tandem.ext.guardian.*;
+import com.tandem.ext.util.DataConversionException;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
-import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.lang.reflect.Field;
+import java.nio.ByteBuffer;
 
 public class TestJava {
+    static Receive recv = null;
+    static EnscribeFile FUMIND = null;
+
     public static void main(String[] args){
-        File file = new File("/G/FU1/SAMOSS/USDDL");
-        try{
-            FileReader fr = new FileReader(file);
-            BufferedReader bf = new BufferedReader(fr);
-            String tmp = null;
-            Document doc = DocumentHelper.createDocument();
-            Element root = doc.addElement("EnscribeFiles"); //根元素
-            Element fileRoot = null; //每個file的根元素
+        ReceiveInfo ri = null;
+        boolean moreOpeners = true;
+        int countRead = 0;
+        int countReply = 0;
+        byte[] msg = new byte[2048];
+        short sysNum = 0;
 
+        openRecv();
+        FUMIND = openFile("FUMIND");
 
-            System.out.println("start!");
-            List<String> strList = new ArrayList<>();
-            String currSection = "";
-            while ((tmp = bf.readLine()) != null){
-                tmp = tmp.trim();
-                if (StringUtils.containsIgnoreCase(tmp, "?SECTION")){
-                    String[] words = tmp.split("\\s+");
-                    currSection = words[1].toUpperCase();
-                    fileRoot = root.addElement(currSection);
-                }else if (tmp.length() >= 2 && StringUtils.isNumeric(tmp.substring(0, 2))) {
-                    if (!tmp.contains(".")){
-                        String nextStr = "";
-                        StringBuilder tmpBuild = new StringBuilder();
-                        tmpBuild.append(tmp);
-                        do {
-                            tmpBuild.append(" ");
-                            nextStr = bf.readLine().trim();
-                            tmpBuild.append(nextStr);
-                        } while (!StringUtils.contains(nextStr, "."));
-                        strList.add(String.valueOf(tmpBuild));
-                    } else {
-                        strList.add(tmp);
+        do {
+            try {
+                countRead = recv.read(msg, msg.length);
+                ri = recv.getLastMessageInfo();
+
+                if (ri.isSystemMessage()) {
+                    /* 久沒新訊息 關閉server */
+                    sysNum = ri.getSystemMessageNumber(msg);
+                    if (sysNum != ReceiveInfo.SYSMSG_OPEN) {
+                        System.out.println("exit process!");
+                        if (FUMIND != null) FUMIND.close();
+                        System.exit(1);
                     }
-                }
+                }else {
+                    /* 收到pathsend來的訊息 */
+                    System.out.println("msg:" + new String(msg));
+                    IpmHeader ipmHeader = new IpmHeader();
+                    FUR211 sendData = new FUR211();
 
-                if (StringUtils.containsIgnoreCase(tmp, "end") &&
-                        tmp.substring(0, 3).equalsIgnoreCase("end")){
-                    ArrayList<Integer> nodeLevelList = new ArrayList<>();
-                    HashMap<Integer, Element> parentNodeMap = new HashMap<>();
-                    int preLevel = 0;
-                    Element preNode = null;
-                    System.out.println("Add element " + currSection + "...");
-                    for (int i = 0; i < strList.size(); i++){
-                        //level colName                                head
-                        //10    AEG-BROKER-ID                PIC X(07) Heading "期貨商代號".
-                        String current = strList.get(i);
-                        String[] words = current.split("\\s+"); // \\s+表示一個空白+任意長度空白
-                        int level = Integer.parseInt(words[0]);
-                        String colName = words[1].replace(".", "");
-                        String head = colName;
-                        if (current.contains("Heading")) {
-                            head = current.substring(current.indexOf("Heading ")+8)
-                                    .replace(".", "").replace("\"", "");
-                            byte[] bytes = new String(head.getBytes(), "BIG5").getBytes(StandardCharsets.UTF_8);
-                            head = new String(bytes);
-                        }
+                    ipmHeader.setValue(msg);
+                    sendData.setValue(msg, ipmHeader.getBytes().length - 2);
 
-                        //System.out.println("current :"+current);
-                        //System.out.println("level   :"+level);
-                        //System.out.println("colName :"+colName);
-                        //System.out.println("head    :"+head);
-
-                        Element node = null;
-                        if (i == 0) {
-                            //第一行欄位，通常是PK
-                            node = fileRoot.addElement(colName);
-                            nodeLevelList.add(level); //5
-                            parentNodeMap.put(level, node);  //5 AEG-PK
-                        }else if (i == strList.size() - 1) {
-                            //最後一行欄位
-                            if (level < preLevel) {
-                                int fatherIndex = nodeLevelList.indexOf(level);
-                                if (fatherIndex > 0)
-                                    fatherIndex--;
-                                Element fatherNode = parentNodeMap.get(nodeLevelList.get(fatherIndex));
-                                node = fatherNode.addElement(colName);
-                            }
-                            else if (level == preLevel) {
-                                int fatherIndex = nodeLevelList.indexOf(level) - 1;
-                                Element fatherNode;
-                                if (fatherIndex <= -1)
-                                    fatherNode = fileRoot;
-                                else
-                                    fatherNode = parentNodeMap.get(nodeLevelList.get(fatherIndex));
-                                node = fatherNode.addElement(colName);
-                            }else {
-                                node = preNode.addElement(colName);
-                            }
-                            nodeLevelList.clear();
-                            parentNodeMap.clear();
-                        }else {
-                            if (level < preLevel) {
-                                //當前階層 < 上一行的階層，去找parent
-                                int fatherIndex = nodeLevelList.indexOf(level);
-                                Element fatherNode;
-                                if (fatherIndex <= 0)
-                                    fatherNode = fileRoot;
-                                else {
-                                    fatherIndex--;
-                                    fatherNode = parentNodeMap.get(nodeLevelList.get(fatherIndex));
-                                }
-                                node = fatherNode.addElement(colName);
-                                nodeLevelList.removeIf(e -> e > level); //大於當前level都刪掉
-                                parentNodeMap.put(level, node);
-                            }else if (level == preLevel) {
-                                //新增同父元素，找上一層父元素
-                                int fatherIndex = nodeLevelList.indexOf(level) - 1;
-                                Element fatherNode;
-                                if (fatherIndex <= -1)
-                                    fatherNode = fileRoot;
-                                else
-                                    fatherNode = parentNodeMap.get(nodeLevelList.get(fatherIndex));
-                                node = fatherNode.addElement(colName);
-                                parentNodeMap.put(level, node);
-                            }else {
-                                //新增子元素，直接在上一個元素下新增
-                                node = preNode.addElement(colName);
-                                nodeLevelList.add(level);
-                                parentNodeMap.put(level, node);
-                            }
-                        }
-                        node.addAttribute("head", head);
-                        preNode = node;
-                        preLevel = level;
+//                    Field[] fields = ipmHeader.getClass().getFields();
+//                    for (Field field : fields) {
+//                        System.out.println(field.toString() + " = " + field.get(ipmHeader));
+//                    }
+//
+//                    fields = sendData.getClass().getFields();
+//                    for (Field field : fields) {
+//                        System.out.println(field.toString() + " = " + field.get(sendData));
+//                    }
+                    ReplyData replyData = new ReplyData();
+                    switch (ipmHeader.functionCode) {
+                        case 1: replyData = insertData(sendData); break;
+                        case 2: replyData = updateData(sendData); break;
+                        case 3: replyData = deleteData(sendData); break;
+                        case 4: replyData = readFirst(sendData); break;
+                        case 5: replyData = readNext(sendData); break;
+                        case 6: replyData = read(sendData); break;
                     }
-                    //break;
-                    strList.clear();
-                    System.out.println("Add element " + currSection + " complete");
+
+                    byte[] replyBytes = replyData.getBytes();
+                    byte[] replyBody = sendData.getBytes();
+                    byte[] replyArea = new byte[replyBytes.length + replyBody.length];
+                    System.arraycopy(replyBytes, 0, replyArea, 0, replyBytes.length);
+                    System.arraycopy(replyBody, 0, replyArea, replyBytes.length, replyBody.length);
+                    System.out.println("hlen="+replyBytes.length);
+                    System.out.println("blen="+replyBody.length);
+                    System.out.println("alen="+replyArea.length);
+                    countReply = recv.reply(replyArea, replyArea.length, GError.EOK);
                 }
+            }catch (ReceiveNoOpeners ex) {
+                moreOpeners = false;
+            }catch (GuardianException ex) {
+                System.out.println(ex.getMessage());
+            }catch (Exception e) {
+                e.printStackTrace();
+                System.exit(1);
             }
+        }while (moreOpeners);
+    }
 
-            FileWriter fw = new FileWriter("EnsFilesXml.xml");
-            OutputFormat of = new OutputFormat();
-            of.setIndentSize(4);//設定Tab為幾個空格
-            of.setNewlines(true);//設定是否換行
-            XMLWriter xw = new XMLWriter(fw, of);
-            xw.write(doc);
-            xw.close();
-            System.out.println("Make xml end.");
-        }catch (Exception e){
+    public static void openRecv() {
+        try {
+            recv = Receive.getInstance();
+            recv.setSystemMessageMask(Receive.SMM_CLOSE | Receive.SMM_ABORTDIALOG | Receive.SMM_CANCEL);
+            recv.open();
+        }catch (GuardianException ex) {
+            System.out.println("Open $Receive failed!");
+            System.out.println(ex.getMessage());
+            System.exit(1);
+        }catch (Exception e) {
+            e.printStackTrace();
+            System.exit(1);
+        }
+    }
+
+    public static EnscribeFile openFile(String fileName) {
+        try {
+            System.out.println("open file "+fileName);
+            EnscribeFile ensFile = new EnscribeFile("/G/FU1/FUDATA/" + fileName);
+            EnscribeOpenOptions openAttr = new EnscribeOpenOptions();
+            openAttr.setAccess(EnscribeOpenOptions.READ_WRITE);
+            openAttr.setExclusion(EnscribeOpenOptions.SHARED);
+            ensFile.open(openAttr);
+            System.out.println("open file success!");
+            return ensFile;
+        }catch (EnscribeFileException ensFileEx) {
+            System.out.println("Open file " + fileName + " failed!, Guardian error = " + ensFileEx.getErrorNum());
+        }catch (Exception e) {
             e.printStackTrace();
         }
+        return null;
+    }
+
+    public static ReplyData insertData(FUR211 sendData) {
+        ReplyData replyData = new ReplyData();
+
+        return replyData;
+    }
+
+    public static ReplyData updateData(FUR211 sendData) {
+        ReplyData replyData = new ReplyData();
+
+        return replyData;
+    }
+
+    public static ReplyData deleteData(FUR211 sendData) {
+        ReplyData replyData = new ReplyData();
+
+        return replyData;
+    }
+
+    public static ReplyData readFirst(FUR211 sendData) {
+        IO_Fumind_r fumindR = new IO_Fumind_r();
+        int countRead = 0;
+
+        ReplyData replyData = new ReplyData();
+        try {
+            countRead = FUMIND.read(fumindR);
+            if (countRead != -1) {
+                sendData.setWsBrokerId(fumindR.getInd_broker_id());
+                sendData.setWsIbNo(fumindR.getInd_ib_no());
+                sendData.setWsIntroduceId(fumindR.getInd_introduce_id());
+                sendData.setWsName(fumindR.getInd_name());
+                sendData.setWsIdNo(fumindR.getInd_idno());
+
+                Field[] fields = fumindR.getClass().getFields();
+                for (Field field : fields) {
+                    System.out.println(field.toString() + " = " + field.get(fumindR));
+                }
+
+                ByteBuffer buffer = ByteBuffer.allocate(Long.BYTES);
+                buffer.putLong(fumindR.getInd_date());
+                ByteBuffer wrapper = ByteBuffer.wrap(buffer.array());
+                sendData.setWsDate(wrapper.getInt());
+                sendData.setWsPhoneNoO(fumindR.getInd_phone_no_o());
+                sendData.setWsPhoneNoH(fumindR.getInd_phone_no_h());
+                sendData.setWsEngName(fumindR.getInd_english_name());
+                sendData.setWsAddr(fumindR.getInd_address());
+                sendData.setWsOperUser(Integer.parseInt(fumindR.getInd_oper_user().trim()));
+                sendData.setWsOperDate((int) fumindR.getInd_oper_date());
+
+                replyData.replyMsg = "查詢完成";
+            } else {
+                replyData.replyCode = 999;
+                replyData.replyMsg = "查無資料!";
+            }
+        } catch (EnscribeFileException e) {
+            throw new RuntimeException(e);
+        } catch (DataConversionException e) {
+            throw new RuntimeException(e);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        return replyData;
+    }
+
+    public static ReplyData readNext(FUR211 sendData) {
+        ReplyData replyData = new ReplyData();
+
+        return replyData;
+    }
+
+    public static ReplyData read(FUR211 sendData) {
+        ReplyData replyData = new ReplyData();
+
+        return replyData;
     }
 }
